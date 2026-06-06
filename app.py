@@ -6,6 +6,8 @@ import io
 import re
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
+import chromadb
+from chromadb.utils import embedding_functions
 
 load_dotenv()
 
@@ -26,25 +28,66 @@ model = ModelInference(
     }
 )
 
-COMPANY_INTERVIEW_DATABASE = {
-    "software engineer": "Technical focus: System Design, Data Structures, REST API design, CI/CD pipelines. HR Focus: Agility, collaborative problem solving.",
-    "data scientist": "Technical focus: Machine Learning, statistical modeling, feature engineering, SQL. HR Focus: Communication of complex insights.",
-    "product manager": "Technical focus: Product metrics, roadmap prioritization, user stories. HR Focus: Leadership and strategic vision.",
-    "web developer": "Technical focus: HTML, CSS, JavaScript, React, REST APIs. HR Focus: Creativity and deadline management.",
-    "devops engineer": "Technical focus: Docker, Kubernetes, CI/CD, AWS/Azure. HR Focus: Reliability and automation mindset.",
-    "machine learning engineer": "Technical focus: Deep learning, model deployment, MLOps, Python. HR Focus: Research mindset and scalability.",
-    "business analyst": "Technical focus: Requirements gathering, SQL, data visualization. HR Focus: Stakeholder management and analytical thinking.",
-    "ai and ml": "Technical focus: Deep learning, NLP, Computer Vision, TensorFlow, PyTorch. HR Focus: Research mindset and scalability.",
-    "ai ml": "Technical focus: Deep learning, NLP, Computer Vision, TensorFlow, PyTorch. HR Focus: Research mindset and scalability."
-}
+# -------------------------------------------------------------
+# REAL RAG — ChromaDB Setup
+# -------------------------------------------------------------
+@st.cache_resource
+def setup_chromadb():
+    client = chromadb.Client()
+    ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name="all-MiniLM-L6-v2"
+    )
+    collection = client.get_or_create_collection(
+        name="interview_knowledge",
+        embedding_function=ef
+    )
 
-def retrieve_rag_context(query: str) -> str:
-    query_lower = query.lower()
-    for key, context in COMPANY_INTERVIEW_DATABASE.items():
-        if key in query_lower:
-            return f"[RAG Context]: {context}"
-    return "[RAG Context]: Standard interview frameworks apply. Evaluate core fundamentals, technical competency, and cultural adaptability."
+    # Interview knowledge documents
+    documents = [
+        "Software Engineer interview requires System Design, Data Structures, REST API design, CI/CD pipelines. HR Focus: Agility and collaborative problem solving.",
+        "Data Scientist interview requires Machine Learning, statistical modeling, feature engineering, SQL. HR Focus: Communication of complex insights.",
+        "Product Manager interview requires Product metrics, roadmap prioritization, user stories, conflict resolution. HR Focus: Leadership and strategic vision.",
+        "Web Developer interview requires HTML, CSS, JavaScript, React, REST APIs, responsive design. HR Focus: Creativity and deadline management.",
+        "DevOps Engineer interview requires Docker, Kubernetes, CI/CD, AWS, Azure, monitoring tools. HR Focus: Reliability and automation mindset.",
+        "Machine Learning Engineer interview requires Deep learning, model deployment, MLOps, Python, cloud ML. HR Focus: Research mindset and scalability.",
+        "Business Analyst interview requires Requirements gathering, process mapping, SQL, data visualization. HR Focus: Stakeholder management and analytical thinking.",
+        "AI and ML interview requires Deep learning, NLP, Computer Vision, TensorFlow, PyTorch, model deployment. HR Focus: Research mindset and experimentation.",
+        "Behavioral interview questions use STAR method: Situation, Task, Action, Result format for answering.",
+        "Technical interview preparation includes practicing coding problems, system design, and algorithm questions.",
+        "HR interview tips: Research company, prepare questions, dress professionally, arrive early, follow up after interview.",
+        "Resume tips: Keep it one page, use action verbs, quantify achievements, tailor to job description.",
+        "Salary negotiation: Research market rate, know your value, negotiate benefits, be professional and confident.",
+        "Common interview mistakes: Not researching company, being unprepared, negative talk about past employers.",
+        "Body language tips: Maintain eye contact, firm handshake, sit straight, smile, listen actively.",
+        "Python interview: Focus on data structures, OOP, list comprehensions, decorators, generators, pandas, numpy.",
+        "Deep Learning interview: Neural networks, CNN, RNN, LSTM, transformers, backpropagation, optimization.",
+        "NLP interview: Tokenization, embeddings, BERT, GPT, sentiment analysis, text classification.",
+        "Data Analysis interview: Pandas, NumPy, data cleaning, EDA, visualization with matplotlib and seaborn.",
+        "Fresher interview tips: Highlight projects, internships, academic achievements, willingness to learn.",
+    ]
 
+    ids = [f"doc_{i}" for i in range(len(documents))]
+
+    existing = collection.count()
+    if existing == 0:
+        collection.add(documents=documents, ids=ids)
+
+    return collection
+
+def retrieve_rag_context(query: str, n_results: int = 3) -> str:
+    collection = setup_chromadb()
+    results = collection.query(
+        query_texts=[query],
+        n_results=n_results
+    )
+    if results and results['documents']:
+        context = "\n".join(results['documents'][0])
+        return f"[RAG Retrieved Context]:\n{context}"
+    return "[RAG Context]: Standard interview frameworks apply."
+
+# -------------------------------------------------------------
+# Page Config
+# -------------------------------------------------------------
 st.set_page_config(
     page_title="AI Interview Trainer Agent",
     page_icon="🎯",
@@ -55,6 +98,7 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 * { font-family: 'Inter', sans-serif; }
+
 .main-header {
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
     padding: 30px;
@@ -66,6 +110,18 @@ st.markdown("""
 }
 .main-header h1 { font-size: 2.2rem; margin-bottom: 5px; }
 .main-header p { font-size: 1rem; opacity: 0.85; }
+
+.rag-badge {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    padding: 5px 12px;
+    border-radius: 20px;
+    color: white;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: inline-block;
+    margin: 5px;
+}
+
 .stat-card {
     background: white;
     padding: 15px;
@@ -76,6 +132,7 @@ st.markdown("""
 }
 .stat-number { font-size: 1.5rem; font-weight: 700; color: #667eea; }
 .stat-label { font-size: 0.8rem; color: #888; margin-top: 4px; }
+
 .question-card {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     padding: 20px 25px;
@@ -86,6 +143,7 @@ st.markdown("""
     margin: 15px 0;
     box-shadow: 0 4px 15px rgba(102,126,234,0.3);
 }
+
 .feedback-card {
     background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
     padding: 15px 20px;
@@ -94,6 +152,7 @@ st.markdown("""
     margin: 10px 0;
     font-weight: 600;
 }
+
 .tip-card {
     background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
     padding: 15px 20px;
@@ -102,6 +161,7 @@ st.markdown("""
     margin: 8px 0;
     font-weight: 500;
 }
+
 .resource-card {
     background: white;
     padding: 20px;
@@ -110,6 +170,7 @@ st.markdown("""
     border-left: 4px solid #667eea;
     margin: 10px 0;
 }
+
 .resume-badge {
     background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
     padding: 8px 15px;
@@ -120,6 +181,7 @@ st.markdown("""
     text-align: center;
     margin: 8px 0;
 }
+
 .complete-card {
     background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
     padding: 25px;
@@ -128,6 +190,7 @@ st.markdown("""
     text-align: center;
     margin: 15px 0;
 }
+
 .stButton > button {
     border-radius: 10px !important;
     font-weight: 600 !important;
@@ -143,11 +206,17 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <h1>🎯 Interview Trainer Agent</h1>
-    <p>Powered by IBM Granite AI | RAG-Based Personalized Interview Preparation</p>
+    <p>Powered by IBM Granite AI | Real RAG with ChromaDB</p>
     <p><small>Problem Statement No.22 | Edunet Foundation</small></p>
+    <div>
+        <span class="rag-badge">🔍 ChromaDB RAG</span>
+        <span class="rag-badge">🤖 IBM Granite</span>
+        <span class="rag-badge">📊 Vector Search</span>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
+# Session State
 for key, default in {
     "messages": [],
     "profile_name": "",
@@ -176,10 +245,13 @@ for key, default in {
 
 def trigger_agent_generation(user_prompt: str):
     st.session_state.messages.append({"role": "user", "content": user_prompt})
+
+    # Real RAG — ChromaDB semantic search
     retrieved_context = retrieve_rag_context(
-        f"{user_prompt} {st.session_state.job_role}"
+        f"{user_prompt} {st.session_state.job_role} {st.session_state.exp_level}"
     )
-    system_instruction = f"""You are an expert AI Interview Trainer Agent powered by RAG.
+
+    system_instruction = f"""You are an expert AI Interview Trainer Agent powered by Real RAG (ChromaDB).
 
 --- USER PROFILE ---
 Candidate Name: {st.session_state.profile_name if st.session_state.profile_name else 'Candidate'}
@@ -187,17 +259,18 @@ Target Job Role: {st.session_state.job_role if st.session_state.job_role else 'G
 Experience Level: {st.session_state.exp_level}
 Resume: {st.session_state.resume_text[:800] if st.session_state.resume_text else 'Not provided.'}
 
---- RAG KNOWLEDGE BASE ---
+--- REAL RAG RETRIEVED CONTEXT (ChromaDB Vector Search) ---
 {retrieved_context}
 
 --- INSTRUCTIONS ---
-1. Use candidate resume to personalize responses.
+1. Use RAG context and resume to personalize responses.
 2. Give SHORT and SIMPLE answers.
 3. Use simple English and bullet points.
 4. For STAR answers: S/T/A/R each 1-2 lines only."""
 
     full_prompt = f"{system_instruction}\n\nUser: {user_prompt}\n\nAssistant:"
-    with st.spinner("🤖 IBM Granite AI analyzing..."):
+
+    with st.spinner("🤖 IBM Granite + ChromaDB RAG analyzing..."):
         try:
             ai_response = model.generate_text(prompt=full_prompt)
             st.session_state.messages.append({
@@ -207,11 +280,20 @@ Resume: {st.session_state.resume_text[:800] if st.session_state.resume_text else
         except Exception as e:
             st.error(f"❌ Error: {e}")
 
+# SIDEBAR
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/5/51/IBM_logo.svg", width=70)
     st.markdown("---")
+
+    # RAG Status
     st.markdown("### 🔍 RAG Status")
-    st.success(f"✅ RAG Ready! {len(COMPANY_INTERVIEW_DATABASE)} roles indexed")
+    try:
+        collection = setup_chromadb()
+        count = collection.count()
+        st.success(f"✅ ChromaDB Ready! {count} documents indexed")
+    except:
+        st.error("❌ ChromaDB Error")
+
     st.markdown("---")
     st.header("👤 Profile Setup")
 
@@ -309,8 +391,10 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
+# MAIN TABS
 tab1, tab2, tab3 = st.tabs(["💬 Chat", "✍️ Practice Mode", "📚 Tips & Resources"])
 
+# TAB 1
 with tab1:
     if not st.session_state.job_role:
         st.markdown("""
@@ -350,11 +434,13 @@ Answer based on my resume."""
         trigger_agent_generation(enhanced_prompt)
         st.rerun()
 
+# TAB 2
 with tab2:
     st.subheader("✍️ Mock Interview Practice")
 
     if not st.session_state.practice_started:
         st.write("⚙️ Setup your practice session:")
+
         col1, col2, col3 = st.columns(3)
         with col1:
             practice_role = st.text_input(
@@ -392,14 +478,17 @@ with tab2:
         if st.session_state.saved_history:
             st.markdown("---")
             st.subheader(f"📋 Previous Session — {len(st.session_state.saved_history)} Questions")
+
             col1, col2 = st.columns([3, 1])
             with col2:
                 if st.button("🗑️ Delete History", use_container_width=True):
                     st.session_state.saved_history = []
                     st.rerun()
+
             total_saved = len(st.session_state.saved_history)
             avg_saved = sum(i['score'] for i in st.session_state.saved_history) / total_saved if total_saved > 0 else 0
             st.markdown(f"⭐ **Avg Score: {avg_saved:.1f}/10** | 📊 **Total: {total_saved} Questions**")
+
             for i, item in enumerate(reversed(st.session_state.saved_history)):
                 q_num = total_saved - i
                 with st.expander(f"Q{q_num}: {item['question'][:55]}... | ⭐ {item['score']}/10"):
@@ -426,6 +515,7 @@ with tab2:
             </div>
             """, unsafe_allow_html=True)
             st.balloons()
+
             if st.button("🔄 Start New Session", use_container_width=True, type="primary"):
                 st.session_state.saved_history = st.session_state.practice_history.copy()
                 st.session_state.practice_started = False
@@ -440,6 +530,7 @@ with tab2:
                 st.markdown(st.session_state.last_feedback)
                 st.markdown(f"⭐ **Score: {st.session_state.last_score}/10**")
                 st.markdown("---")
+
                 if st.button("➡️ Next Question", use_container_width=True, type="primary"):
                     st.session_state.show_feedback = False
                     st.session_state.last_feedback = ""
@@ -448,12 +539,14 @@ with tab2:
 
             else:
                 if not st.session_state.current_question:
-                    with st.spinner(f"🤖 Generating Question {done+1} of {total}..."):
+                    with st.spinner(f"🤖 ChromaDB RAG + IBM Granite generating Q{done+1}..."):
                         try:
+                            # Real RAG — semantic search
                             rag_context = retrieve_rag_context(
-                                f"{st.session_state.p_question_type} {st.session_state.practice_role}"
+                                f"{st.session_state.p_question_type} interview {st.session_state.practice_role}"
                             )
                             resume_hint = f"Resume: {st.session_state.resume_text[:400]}" if st.session_state.resume_text else ""
+
                             prev_questions = ""
                             if st.session_state.practice_history:
                                 prev_questions = "Do NOT repeat:\n"
@@ -463,6 +556,7 @@ with tab2:
                             q_prompt = f"""{rag_context}
 {resume_hint}
 {prev_questions}
+
 Generate ONE {st.session_state.p_question_type} question for {st.session_state.practice_role} at {st.session_state.p_difficulty} level.
 Return ONLY the question."""
                             question = model.generate_text(prompt=q_prompt)
@@ -493,6 +587,7 @@ Return ONLY the question."""
                                 with st.spinner("🔍 Evaluating..."):
                                     try:
                                         eval_prompt = f"""Strict interview evaluator.
+
 Question: {st.session_state.current_question}
 Answer: {user_answer}
 
@@ -506,8 +601,10 @@ IMPROVEMENTS:
 - Point 2
 MODEL ANSWER:
 Brief ideal answer.
+
 No extra text."""
                                         feedback = model.generate_text(prompt=eval_prompt)
+
                                         parsed_score = 7.0
                                         try:
                                             m = re.search(r'SCORE:\s*(\d+(?:\.\d+)?)\s*/\s*10', feedback, re.IGNORECASE)
@@ -515,6 +612,7 @@ No extra text."""
                                                 parsed_score = float(m.group(1))
                                         except:
                                             pass
+
                                         st.session_state.practice_history.append({
                                             "question": st.session_state.current_question,
                                             "answer": user_answer,
@@ -565,8 +663,10 @@ No extra text."""
             st.session_state.show_feedback = False
             st.rerun()
 
+# TAB 3
 with tab3:
     st.subheader("📚 Interview Tips & Resources")
+
     col1, col2 = st.columns(2)
     with col1:
         tip_category = st.selectbox("📌 Select Topic:", [
@@ -587,10 +687,11 @@ with tab3:
         )
 
     if st.button("💡 Get Tips", use_container_width=True, type="primary"):
-        with st.spinner("📖 Fetching tips..."):
+        with st.spinner("📖 ChromaDB searching + IBM Granite generating..."):
             try:
                 rag_context = retrieve_rag_context(f"{tip_category} {tip_role}")
                 tips_prompt = f"""{rag_context}
+
 Simple guide on: {tip_category}
 For: {tip_role if tip_role else 'General'}
 Numbered list. Short simple points. Max 8."""
