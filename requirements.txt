@@ -2,3 +2,5 @@ streamlit
 ibm-watsonx-ai
 python-dotenv
 PyPDF2
+chromadb
+sentence-transformers
