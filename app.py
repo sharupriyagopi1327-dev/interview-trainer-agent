@@ -6,8 +6,9 @@ import io
 import re
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
-import chromadb
-from chromadb.utils import embedding_functions
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_text_splitters import CharacterTextSplitter
 
 load_dotenv()
 
@@ -29,61 +30,47 @@ model = ModelInference(
 )
 
 # -------------------------------------------------------------
-# REAL RAG — ChromaDB Setup
+# REAL RAG — FAISS + HuggingFace Embeddings
 # -------------------------------------------------------------
+INTERVIEW_DOCUMENTS = [
+    "Software Engineer interview requires System Design, Data Structures, REST API design, CI/CD pipelines. HR Focus: Agility and collaborative problem solving.",
+    "Data Scientist interview requires Machine Learning, statistical modeling, feature engineering, SQL. HR Focus: Communication of complex insights.",
+    "Product Manager interview requires Product metrics, roadmap prioritization, user stories, conflict resolution. HR Focus: Leadership and strategic vision.",
+    "Web Developer interview requires HTML, CSS, JavaScript, React, REST APIs, responsive design. HR Focus: Creativity and deadline management.",
+    "DevOps Engineer interview requires Docker, Kubernetes, CI/CD, AWS, Azure, monitoring tools. HR Focus: Reliability and automation mindset.",
+    "Machine Learning Engineer interview requires Deep learning, model deployment, MLOps, Python, cloud ML. HR Focus: Research mindset and scalability.",
+    "Business Analyst interview requires Requirements gathering, process mapping, SQL, data visualization. HR Focus: Stakeholder management and analytical thinking.",
+    "AI and ML interview requires Deep learning, NLP, Computer Vision, TensorFlow, PyTorch, model deployment. HR Focus: Research mindset and experimentation.",
+    "Behavioral interview questions use STAR method: Situation, Task, Action, Result format for answering.",
+    "Technical interview preparation includes practicing coding problems, system design, and algorithm questions.",
+    "HR interview tips: Research company, prepare questions, dress professionally, arrive early, follow up after interview.",
+    "Resume tips: Keep it one page, use action verbs, quantify achievements, tailor to job description.",
+    "Salary negotiation: Research market rate, know your value, negotiate benefits, be professional and confident.",
+    "Common interview mistakes: Not researching company, being unprepared, negative talk about past employers.",
+    "Body language tips: Maintain eye contact, firm handshake, sit straight, smile, listen actively.",
+    "Python interview: Focus on data structures, OOP, list comprehensions, decorators, generators, pandas, numpy.",
+    "Deep Learning interview: Neural networks, CNN, RNN, LSTM, transformers, backpropagation, optimization.",
+    "NLP interview: Tokenization, embeddings, BERT, GPT, sentiment analysis, text classification.",
+    "Data Analysis interview: Pandas, NumPy, data cleaning, EDA, visualization with matplotlib and seaborn.",
+    "Fresher interview tips: Highlight projects, internships, academic achievements, willingness to learn.",
+]
+
 @st.cache_resource
-def setup_chromadb():
-    client = chromadb.Client()
-    ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2"
-    )
-    collection = client.get_or_create_collection(
-        name="interview_knowledge",
-        embedding_function=ef
-    )
-
-    # Interview knowledge documents
-    documents = [
-        "Software Engineer interview requires System Design, Data Structures, REST API design, CI/CD pipelines. HR Focus: Agility and collaborative problem solving.",
-        "Data Scientist interview requires Machine Learning, statistical modeling, feature engineering, SQL. HR Focus: Communication of complex insights.",
-        "Product Manager interview requires Product metrics, roadmap prioritization, user stories, conflict resolution. HR Focus: Leadership and strategic vision.",
-        "Web Developer interview requires HTML, CSS, JavaScript, React, REST APIs, responsive design. HR Focus: Creativity and deadline management.",
-        "DevOps Engineer interview requires Docker, Kubernetes, CI/CD, AWS, Azure, monitoring tools. HR Focus: Reliability and automation mindset.",
-        "Machine Learning Engineer interview requires Deep learning, model deployment, MLOps, Python, cloud ML. HR Focus: Research mindset and scalability.",
-        "Business Analyst interview requires Requirements gathering, process mapping, SQL, data visualization. HR Focus: Stakeholder management and analytical thinking.",
-        "AI and ML interview requires Deep learning, NLP, Computer Vision, TensorFlow, PyTorch, model deployment. HR Focus: Research mindset and experimentation.",
-        "Behavioral interview questions use STAR method: Situation, Task, Action, Result format for answering.",
-        "Technical interview preparation includes practicing coding problems, system design, and algorithm questions.",
-        "HR interview tips: Research company, prepare questions, dress professionally, arrive early, follow up after interview.",
-        "Resume tips: Keep it one page, use action verbs, quantify achievements, tailor to job description.",
-        "Salary negotiation: Research market rate, know your value, negotiate benefits, be professional and confident.",
-        "Common interview mistakes: Not researching company, being unprepared, negative talk about past employers.",
-        "Body language tips: Maintain eye contact, firm handshake, sit straight, smile, listen actively.",
-        "Python interview: Focus on data structures, OOP, list comprehensions, decorators, generators, pandas, numpy.",
-        "Deep Learning interview: Neural networks, CNN, RNN, LSTM, transformers, backpropagation, optimization.",
-        "NLP interview: Tokenization, embeddings, BERT, GPT, sentiment analysis, text classification.",
-        "Data Analysis interview: Pandas, NumPy, data cleaning, EDA, visualization with matplotlib and seaborn.",
-        "Fresher interview tips: Highlight projects, internships, academic achievements, willingness to learn.",
-    ]
-
-    ids = [f"doc_{i}" for i in range(len(documents))]
-
-    existing = collection.count()
-    if existing == 0:
-        collection.add(documents=documents, ids=ids)
-
-    return collection
+def setup_faiss():
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    text_splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    docs = text_splitter.create_documents(INTERVIEW_DOCUMENTS)
+    vectorstore = FAISS.from_documents(docs, embeddings)
+    return vectorstore
 
 def retrieve_rag_context(query: str, n_results: int = 3) -> str:
-    collection = setup_chromadb()
-    results = collection.query(
-        query_texts=[query],
-        n_results=n_results
-    )
-    if results and results['documents']:
-        context = "\n".join(results['documents'][0])
+    try:
+        vectorstore = setup_faiss()
+        docs = vectorstore.similarity_search(query, k=n_results)
+        context = "\n".join([doc.page_content for doc in docs])
         return f"[RAG Retrieved Context]:\n{context}"
-    return "[RAG Context]: Standard interview frameworks apply."
+    except Exception as e:
+        return "[RAG Context]: Standard interview frameworks apply."
 
 # -------------------------------------------------------------
 # Page Config
@@ -206,10 +193,10 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <h1>🎯 Interview Trainer Agent</h1>
-    <p>Powered by IBM Granite AI | Real RAG with ChromaDB</p>
+    <p>Powered by IBM Granite AI | Real RAG with FAISS Vector Search</p>
     <p><small>Problem Statement No.22 | Edunet Foundation</small></p>
     <div>
-        <span class="rag-badge">🔍 ChromaDB RAG</span>
+        <span class="rag-badge">🔍 FAISS RAG</span>
         <span class="rag-badge">🤖 IBM Granite</span>
         <span class="rag-badge">📊 Vector Search</span>
     </div>
@@ -246,12 +233,11 @@ for key, default in {
 def trigger_agent_generation(user_prompt: str):
     st.session_state.messages.append({"role": "user", "content": user_prompt})
 
-    # Real RAG — ChromaDB semantic search
     retrieved_context = retrieve_rag_context(
         f"{user_prompt} {st.session_state.job_role} {st.session_state.exp_level}"
     )
 
-    system_instruction = f"""You are an expert AI Interview Trainer Agent powered by Real RAG (ChromaDB).
+    system_instruction = f"""You are an expert AI Interview Trainer Agent powered by Real RAG (FAISS Vector Search).
 
 --- USER PROFILE ---
 Candidate Name: {st.session_state.profile_name if st.session_state.profile_name else 'Candidate'}
@@ -259,7 +245,7 @@ Target Job Role: {st.session_state.job_role if st.session_state.job_role else 'G
 Experience Level: {st.session_state.exp_level}
 Resume: {st.session_state.resume_text[:800] if st.session_state.resume_text else 'Not provided.'}
 
---- REAL RAG RETRIEVED CONTEXT (ChromaDB Vector Search) ---
+--- REAL RAG RETRIEVED CONTEXT (FAISS Vector Search) ---
 {retrieved_context}
 
 --- INSTRUCTIONS ---
@@ -270,7 +256,7 @@ Resume: {st.session_state.resume_text[:800] if st.session_state.resume_text else
 
     full_prompt = f"{system_instruction}\n\nUser: {user_prompt}\n\nAssistant:"
 
-    with st.spinner("🤖 IBM Granite + ChromaDB RAG analyzing..."):
+    with st.spinner("🤖 IBM Granite + FAISS RAG analyzing..."):
         try:
             ai_response = model.generate_text(prompt=full_prompt)
             st.session_state.messages.append({
@@ -285,14 +271,12 @@ with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/5/51/IBM_logo.svg", width=70)
     st.markdown("---")
 
-    # RAG Status
     st.markdown("### 🔍 RAG Status")
     try:
-        collection = setup_chromadb()
-        count = collection.count()
-        st.success(f"✅ ChromaDB Ready! {count} documents indexed")
-    except:
-        st.error("❌ ChromaDB Error")
+        vs = setup_faiss()
+        st.success(f"✅ FAISS RAG Ready! {len(INTERVIEW_DOCUMENTS)} docs indexed")
+    except Exception as e:
+        st.error(f"❌ RAG Error: {e}")
 
     st.markdown("---")
     st.header("👤 Profile Setup")
@@ -478,17 +462,14 @@ with tab2:
         if st.session_state.saved_history:
             st.markdown("---")
             st.subheader(f"📋 Previous Session — {len(st.session_state.saved_history)} Questions")
-
             col1, col2 = st.columns([3, 1])
             with col2:
                 if st.button("🗑️ Delete History", use_container_width=True):
                     st.session_state.saved_history = []
                     st.rerun()
-
             total_saved = len(st.session_state.saved_history)
             avg_saved = sum(i['score'] for i in st.session_state.saved_history) / total_saved if total_saved > 0 else 0
             st.markdown(f"⭐ **Avg Score: {avg_saved:.1f}/10** | 📊 **Total: {total_saved} Questions**")
-
             for i, item in enumerate(reversed(st.session_state.saved_history)):
                 q_num = total_saved - i
                 with st.expander(f"Q{q_num}: {item['question'][:55]}... | ⭐ {item['score']}/10"):
@@ -530,7 +511,6 @@ with tab2:
                 st.markdown(st.session_state.last_feedback)
                 st.markdown(f"⭐ **Score: {st.session_state.last_score}/10**")
                 st.markdown("---")
-
                 if st.button("➡️ Next Question", use_container_width=True, type="primary"):
                     st.session_state.show_feedback = False
                     st.session_state.last_feedback = ""
@@ -539,14 +519,12 @@ with tab2:
 
             else:
                 if not st.session_state.current_question:
-                    with st.spinner(f"🤖 ChromaDB RAG + IBM Granite generating Q{done+1}..."):
+                    with st.spinner(f"🤖 FAISS RAG + IBM Granite generating Q{done+1}..."):
                         try:
-                            # Real RAG — semantic search
                             rag_context = retrieve_rag_context(
                                 f"{st.session_state.p_question_type} interview {st.session_state.practice_role}"
                             )
                             resume_hint = f"Resume: {st.session_state.resume_text[:400]}" if st.session_state.resume_text else ""
-
                             prev_questions = ""
                             if st.session_state.practice_history:
                                 prev_questions = "Do NOT repeat:\n"
@@ -604,7 +582,6 @@ Brief ideal answer.
 
 No extra text."""
                                         feedback = model.generate_text(prompt=eval_prompt)
-
                                         parsed_score = 7.0
                                         try:
                                             m = re.search(r'SCORE:\s*(\d+(?:\.\d+)?)\s*/\s*10', feedback, re.IGNORECASE)
@@ -687,7 +664,7 @@ with tab3:
         )
 
     if st.button("💡 Get Tips", use_container_width=True, type="primary"):
-        with st.spinner("📖 ChromaDB searching + IBM Granite generating..."):
+        with st.spinner("📖 FAISS searching + IBM Granite generating..."):
             try:
                 rag_context = retrieve_rag_context(f"{tip_category} {tip_role}")
                 tips_prompt = f"""{rag_context}
